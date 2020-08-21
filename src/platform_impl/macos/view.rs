@@ -257,7 +257,7 @@ lazy_static! {
         );
         decl.add_ivar::<*mut c_void>("winitState");
         decl.add_ivar::<id>("markedText");
-        decl.add_ivar::<bool>("is_composing");
+        decl.add_ivar::<bool>("isComposing");
         let protocol = Protocol::get("NSTextInputClient").unwrap();
         decl.add_protocol(&protocol);
         ViewClass(decl.register())
@@ -268,7 +268,7 @@ extern "C" fn dealloc(this: &Object, _sel: Sel) {
     unsafe {
         let state: *mut c_void = *this.get_ivar("winitState");
         let marked_text: id = *this.get_ivar("markedText");
-        let is_composing: bool = *this.get_ivar("is_composing");
+        let is_composing: bool = *this.get_ivar("isComposing");
         let _: () = msg_send![marked_text, release];
         Box::from_raw(state as *mut ViewState);
     }
@@ -282,7 +282,7 @@ extern "C" fn init_with_winit(this: &Object, _sel: Sel, state: *mut c_void) -> i
             let marked_text =
                 <id as NSMutableAttributedString>::init(NSMutableAttributedString::alloc(nil));
             (*this).set_ivar("markedText", marked_text);
-            (*this).set_ivar("is_composing", false);
+            (*this).set_ivar("isComposing", false);
             let _: () = msg_send![this, setPostsFrameChangedNotifications: YES];
 
             let notification_center: &Object =
@@ -445,7 +445,7 @@ extern "C" fn set_marked_text(
         );
         let composed_string = str::from_utf8_unchecked(slice);
 
-        let is_composing: bool = *this.get_ivar("is_composing");
+        let is_composing: bool = *this.get_ivar("isComposing");
         if !is_composing {
             AppState::queue_event(EventWrapper::StaticEvent(Event::WindowEvent {
                 window_id: WindowId(get_window_id(state.ns_window)),
@@ -453,7 +453,7 @@ extern "C" fn set_marked_text(
                     composed_string.to_owned(),
                 )),
             }));
-            this.set_ivar("is_composing", true);
+            this.set_ivar("isComposing", true);
         } else {
             AppState::queue_event(EventWrapper::StaticEvent(Event::WindowEvent {
                 window_id: WindowId(get_window_id(state.ns_window)),
@@ -553,13 +553,13 @@ extern "C" fn insert_text(this: &mut Object, _sel: Sel, string: id, _replacement
         //let event: id = msg_send![NSApp(), currentEvent];
 
         let mut events = VecDeque::with_capacity(characters.len());
-        let is_composing: bool = *this.get_ivar("is_composing");
+        let is_composing: bool = *this.get_ivar("isComposing");
         if is_composing {
             events.push_back(EventWrapper::StaticEvent(Event::WindowEvent {
                 window_id: WindowId(get_window_id(state.ns_window)),
                 event: WindowEvent::Composition(CompositionEvent::CompositionEnd(string.clone())),
             }));
-            this.set_ivar("is_composing", false);
+            this.set_ivar("isComposing", false);
         }
 
         for character in string.chars() {
