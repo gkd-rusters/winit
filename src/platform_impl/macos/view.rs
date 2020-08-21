@@ -19,8 +19,8 @@ use objc::{
 use crate::{
     dpi::LogicalPosition,
     event::{
-        DeviceEvent, ElementState, Event, KeyboardInput, ModifiersState, MouseButton,
-        MouseScrollDelta, TouchPhase, VirtualKeyCode, WindowEvent,
+        CompositionEvent, DeviceEvent, ElementState, Event, KeyboardInput, ModifiersState,
+        MouseButton, MouseScrollDelta, TouchPhase, VirtualKeyCode, WindowEvent,
     },
     platform_impl::platform::{
         app_state::AppState,
@@ -161,7 +161,7 @@ lazy_static! {
         );
         decl.add_method(
             sel!(insertText:replacementRange:),
-            insert_text as extern "C" fn(&Object, Sel, id, NSRange),
+            insert_text as extern "C" fn(&mut Object, Sel, id, NSRange),
         );
         decl.add_method(
             sel!(characterIndexForPoint:),
@@ -257,6 +257,7 @@ lazy_static! {
         );
         decl.add_ivar::<*mut c_void>("winitState");
         decl.add_ivar::<id>("markedText");
+        decl.add_ivar::<bool>("is_composing");
         let protocol = Protocol::get("NSTextInputClient").unwrap();
         decl.add_protocol(&protocol);
         ViewClass(decl.register())
@@ -267,6 +268,7 @@ extern "C" fn dealloc(this: &Object, _sel: Sel) {
     unsafe {
         let state: *mut c_void = *this.get_ivar("winitState");
         let marked_text: id = *this.get_ivar("markedText");
+        let is_composing: bool = *this.get_ivar("is_composing");
         let _: () = msg_send![marked_text, release];
         Box::from_raw(state as *mut ViewState);
     }
@@ -280,6 +282,7 @@ extern "C" fn init_with_winit(this: &Object, _sel: Sel, state: *mut c_void) -> i
             let marked_text =
                 <id as NSMutableAttributedString>::init(NSMutableAttributedString::alloc(nil));
             (*this).set_ivar("markedText", marked_text);
+            (*this).set_ivar("is_composing", false);
             let _: () = msg_send![this, setPostsFrameChangedNotifications: YES];
 
             let notification_center: &Object =
@@ -416,7 +419,7 @@ extern "C" fn set_marked_text(
     this: &mut Object,
     _sel: Sel,
     string: id,
-    _selected_range: NSRange,
+    selected_range: NSRange,
     _replacement_range: NSRange,
 ) {
     trace!("Triggered `setMarkedText`");
@@ -430,7 +433,36 @@ extern "C" fn set_marked_text(
         } else {
             marked_text.initWithString(string);
         };
+        let composed_string = marked_text.clone().string();
         *marked_text_ref = marked_text;
+
+        let state_ptr: *mut c_void = *this.get_ivar("winitState");
+        let state = &mut *(state_ptr as *mut ViewState);
+
+        let slice = slice::from_raw_parts(
+            composed_string.UTF8String() as *const c_uchar,
+            composed_string.len(),
+        );
+        let composed_string = str::from_utf8_unchecked(slice);
+
+        let is_composing: bool = *this.get_ivar("is_composing");
+        if !is_composing {
+            AppState::queue_event(EventWrapper::StaticEvent(Event::WindowEvent {
+                window_id: WindowId(get_window_id(state.ns_window)),
+                event: WindowEvent::Composition(CompositionEvent::CompositionStart(
+                    composed_string.to_owned(),
+                )),
+            }));
+            this.set_ivar("is_composing", true);
+        } else {
+            AppState::queue_event(EventWrapper::StaticEvent(Event::WindowEvent {
+                window_id: WindowId(get_window_id(state.ns_window)),
+                event: WindowEvent::Composition(CompositionEvent::CompositionUpdate(
+                    composed_string.to_owned(),
+                    selected_range.location as usize,
+                )),
+            }));
+        }
     }
     trace!("Completed `setMarkedText`");
 }
@@ -494,7 +526,7 @@ extern "C" fn first_rect_for_character_range(
     }
 }
 
-extern "C" fn insert_text(this: &Object, _sel: Sel, string: id, _replacement_range: NSRange) {
+extern "C" fn insert_text(this: &mut Object, _sel: Sel, string: id, _replacement_range: NSRange) {
     trace!("Triggered `insertText`");
     unsafe {
         let state_ptr: *mut c_void = *this.get_ivar("winitState");
@@ -511,14 +543,26 @@ extern "C" fn insert_text(this: &Object, _sel: Sel, string: id, _replacement_ran
 
         let slice =
             slice::from_raw_parts(characters.UTF8String() as *const c_uchar, characters.len());
-        let string = str::from_utf8_unchecked(slice);
+        let string: String = str::from_utf8_unchecked(slice)
+            .chars()
+            .filter(|c| !is_corporate_character(*c))
+            .collect();
         state.is_key_down = true;
 
         // We don't need this now, but it's here if that changes.
         //let event: id = msg_send![NSApp(), currentEvent];
 
         let mut events = VecDeque::with_capacity(characters.len());
-        for character in string.chars().filter(|c| !is_corporate_character(*c)) {
+        let is_composing: bool = *this.get_ivar("is_composing");
+        if is_composing {
+            events.push_back(EventWrapper::StaticEvent(Event::WindowEvent {
+                window_id: WindowId(get_window_id(state.ns_window)),
+                event: WindowEvent::Composition(CompositionEvent::CompositionEnd(string.clone())),
+            }));
+            this.set_ivar("is_composing", false);
+        }
+
+        for character in string.chars() {
             events.push_back(EventWrapper::StaticEvent(Event::WindowEvent {
                 window_id: WindowId(get_window_id(state.ns_window)),
                 event: WindowEvent::ReceivedCharacter(character),
