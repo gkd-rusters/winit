@@ -268,7 +268,6 @@ extern "C" fn dealloc(this: &Object, _sel: Sel) {
     unsafe {
         let state: *mut c_void = *this.get_ivar("winitState");
         let marked_text: id = *this.get_ivar("markedText");
-        let is_composing: bool = *this.get_ivar("isComposing");
         let _: () = msg_send![marked_text, release];
         Box::from_raw(state as *mut ViewState);
     }
@@ -449,20 +448,18 @@ extern "C" fn set_marked_text(
         if !is_composing {
             AppState::queue_event(EventWrapper::StaticEvent(Event::WindowEvent {
                 window_id: WindowId(get_window_id(state.ns_window)),
-                event: WindowEvent::Composition(CompositionEvent::CompositionStart(
-                    composed_string.to_owned(),
-                )),
+                event: WindowEvent::Composition(CompositionEvent::CompositionStart("".to_owned())),
             }));
             this.set_ivar("isComposing", true);
-        } else {
-            AppState::queue_event(EventWrapper::StaticEvent(Event::WindowEvent {
-                window_id: WindowId(get_window_id(state.ns_window)),
-                event: WindowEvent::Composition(CompositionEvent::CompositionUpdate(
-                    composed_string.to_owned(),
-                    selected_range.location as usize,
-                )),
-            }));
         }
+
+        AppState::queue_event(EventWrapper::StaticEvent(Event::WindowEvent {
+            window_id: WindowId(get_window_id(state.ns_window)),
+            event: WindowEvent::Composition(CompositionEvent::CompositionUpdate(
+                composed_string.to_owned(),
+                selected_range.location as usize,
+            )),
+        }));
     }
     trace!("Completed `setMarkedText`");
 }
