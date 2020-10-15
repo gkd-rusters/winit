@@ -549,7 +549,15 @@ extern "C" fn insert_text(this: &mut Object, _sel: Sel, string: id, _replacement
         // We don't need this now, but it's here if that changes.
         //let event: id = msg_send![NSApp(), currentEvent];
 
-        let mut events = VecDeque::with_capacity(characters.len());
+        let mut events = VecDeque::with_capacity(characters.len());        
+        
+        for character in string.chars() {
+            events.push_back(EventWrapper::StaticEvent(Event::WindowEvent {
+                window_id: WindowId(get_window_id(state.ns_window)),
+                event: WindowEvent::ReceivedCharacter(character),
+            }));
+        }
+
         let is_composing: bool = *this.get_ivar("isComposing");
         if is_composing {
             events.push_back(EventWrapper::StaticEvent(Event::WindowEvent {
@@ -557,13 +565,6 @@ extern "C" fn insert_text(this: &mut Object, _sel: Sel, string: id, _replacement
                 event: WindowEvent::Composition(CompositionEvent::CompositionEnd(string.clone())),
             }));
             this.set_ivar("isComposing", false);
-        }
-
-        for character in string.chars() {
-            events.push_back(EventWrapper::StaticEvent(Event::WindowEvent {
-                window_id: WindowId(get_window_id(state.ns_window)),
-                event: WindowEvent::ReceivedCharacter(character),
-            }));
         }
 
         AppState::queue_events(events);
