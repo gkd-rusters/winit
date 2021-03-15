@@ -4,17 +4,21 @@ use std::{
 };
 
 use cocoa::{
-    appkit::{CGFloat, NSScreen, NSWindow, NSWindowStyleMask},
+    appkit::{CGFloat, NSScreen, NSWindow, NSWindowOrderingMode, NSWindowStyleMask},
     base::{id, nil},
     foundation::{NSPoint, NSSize, NSString},
 };
 use dispatch::Queue;
 use objc::rc::autoreleasepool;
-use objc::runtime::NO;
+use objc::runtime::{NO, YES};
 
 use crate::{
     dpi::LogicalSize,
-    platform_impl::platform::{ffi, util::IdRef, window::SharedState},
+    platform_impl::platform::{
+        ffi,
+        util::IdRef,
+        window::{get_window_id, SharedState},
+    },
 };
 
 // Unsafe wrapper type that allows us to dispatch things that aren't Send.
@@ -205,6 +209,48 @@ pub unsafe fn set_title_async(ns_window: id, title: String) {
     });
 }
 
+pub unsafe fn add_child_window_async(child_ns_window: id, parent_ns_window: id) {
+    let ns_window = MainThreadSafe(parent_ns_window);
+    let child_ns_window = MainThreadSafe(child_ns_window);
+
+    Queue::main().exec_async(move || {
+        let _: () =
+            ns_window.addChildWindow_(*child_ns_window, NSWindowOrderingMode::NSWindowAbove);
+    });
+}
+
+pub unsafe fn remove_child_window_async(child_ns_window: id) {
+    let child_ns_window = MainThreadSafe(child_ns_window);
+    Queue::main().exec_async(move || {
+        let ns_window = child_ns_window.parentWindow_();
+
+        if ns_window != nil {
+            let _: () = ns_window.removeChildWindow_(*child_ns_window);
+        }
+    });
+}
+
+pub unsafe fn child_windows(ns_window: id) {
+    let children: id = ns_window.ChildWindows_();
+    let cw_enum: id = msg_send![children, objectEnumerator];
+    loop {
+        let cw: id = msg_send![cw_enum, nextObject];
+        if cw == nil {
+            println!("no more ChildWindow ");
+            break;
+        }
+        println!("Enumerate ChildWindow {:?}", &get_window_id(cw),);
+    }
+}
+
+pub unsafe fn set_window_ignore_mouse_events(ns_window: id, is_ignore_mouse_events: bool) {
+    let ns_window = MainThreadSafe(ns_window);
+    Queue::main().exec_async(move || match is_ignore_mouse_events {
+        true => ns_window.setIgnoresMouseEvents_(YES),
+        false => ns_window.setIgnoresMouseEvents_(NO),
+    })
+}
+
 // `close:` is thread-safe, but we want the event to be triggered from the main
 // thread. Though, it's a good idea to look into that more...
 //
@@ -214,7 +260,7 @@ pub unsafe fn close_async(ns_window: IdRef) {
     let ns_window = MainThreadSafe(ns_window);
     Queue::main().exec_async(move || {
         autoreleasepool(move || {
-            ns_window.close();
+            let _: () = ns_window.close();
         });
     });
 }

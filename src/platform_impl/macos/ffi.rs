@@ -172,6 +172,9 @@ pub type CGDisplayModeRef = *mut libc::c_void;
 extern "C" {
     pub fn CGDisplayCreateUUIDFromDisplayID(display: CGDirectDisplayID) -> CFUUIDRef;
 }
+pub const NSTrackingMouseEnteredAndExited: u8 = 0x01;
+pub const NNSTrackingMouseMoved: u8 = 0x02;
+pub const NSTrackingActiveAlways: u8 = 0x80;
 
 #[link(name = "CoreGraphics", kind = "framework")]
 extern "C" {

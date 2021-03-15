@@ -172,3 +172,45 @@ impl MonitorHandle {
         self.inner.video_modes()
     }
 }
+
+pub fn get_all_monitors() -> Vec<MonitorHandle> {
+    platform_impl::available_monitors()
+        .into_iter()
+        .map(|inner| MonitorHandle { inner })
+        .collect::<Vec<_>>()
+}
+
+/// get corresponding monitor from physical position
+pub fn get_monitor_from_position(x: i32, y: i32) -> Option<MonitorHandle> {
+    let monitors = get_all_monitors();
+    for monitor in monitors {
+        let monitor_x = monitor.position().x;
+        let monitor_y = monitor.position().y;
+        let width = monitor.size().width as i32;
+        let height = monitor.size().height as i32;
+
+        if monitor_x <= x && x < monitor_x + width && monitor_y <= y && y < monitor_y + height {
+            return Some(monitor);
+        }
+    }
+
+    None
+}
+
+/// get corresponding monitor from physical rect
+pub fn get_monitor_from_rect(x: i32, y: i32, width: i32, height: i32) -> Option<MonitorHandle> {
+    let left_top_point_monitor = get_monitor_from_position(x, y);
+
+    if let Some(monitor) = left_top_point_monitor {
+        let monitor_x = monitor.position().x;
+        let monitor_y = monitor.position().y;
+        let monitor_width = monitor.size().width as i32;
+        let monitor_height = monitor.size().height as i32;
+
+        if x + width < monitor_x + monitor_width && y + height < monitor_y + monitor_height {
+            return Some(monitor);
+        }
+    }
+
+    None
+}

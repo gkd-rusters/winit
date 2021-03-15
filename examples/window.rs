@@ -1,4 +1,5 @@
 use simple_logger::SimpleLogger;
+use winit::platform::macos::WindowBuilderExtMacOS;
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
@@ -12,6 +13,7 @@ fn main() {
     let window = WindowBuilder::new()
         .with_title("A fantastic window!")
         .with_inner_size(winit::dpi::LogicalSize::new(128.0, 128.0))
+        .with_visible_in_all_workspace(true)
         .build(&event_loop)
         .unwrap();
 

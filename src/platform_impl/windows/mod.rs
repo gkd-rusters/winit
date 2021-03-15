@@ -5,7 +5,7 @@ use winapi::{self, shared::windef::HMENU, shared::windef::HWND};
 pub use self::{
     event_loop::{EventLoop, EventLoopProxy, EventLoopWindowTarget},
     icon::WinIcon,
-    monitor::{MonitorHandle, VideoMode},
+    monitor::{available_monitors, MonitorHandle, VideoMode},
     window::Window,
 };
 
@@ -23,6 +23,7 @@ pub struct PlatformSpecificWindowBuilderAttributes {
     pub no_redirection_bitmap: bool,
     pub drag_and_drop: bool,
     pub preferred_theme: Option<Theme>,
+    pub on_taskbar: bool,
 }
 
 impl Default for PlatformSpecificWindowBuilderAttributes {
@@ -34,6 +35,7 @@ impl Default for PlatformSpecificWindowBuilderAttributes {
             no_redirection_bitmap: false,
             drag_and_drop: true,
             preferred_theme: None,
+            on_taskbar: true,
         }
     }
 }
@@ -85,6 +87,9 @@ impl WindowId {
         use std::ptr::null_mut;
 
         WindowId(null_mut())
+    }
+    pub fn get_handle(&self) -> HWND {
+        self.0
     }
 }
 

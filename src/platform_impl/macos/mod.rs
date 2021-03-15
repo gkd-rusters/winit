@@ -16,9 +16,12 @@ mod window_delegate;
 
 use std::{fmt, ops::Deref, sync::Arc};
 
+use window::get_window_cocoa_id;
+
+use self::util::IdRef;
 pub use self::{
     event_loop::{EventLoop, EventLoopWindowTarget, Proxy as EventLoopProxy},
-    monitor::{MonitorHandle, VideoMode},
+    monitor::{available_monitors, MonitorHandle, VideoMode},
     window::{Id as WindowId, PlatformSpecificWindowBuilderAttributes, UnownedWindow},
 };
 use crate::{
@@ -68,8 +71,31 @@ impl Window {
         attributes: WindowAttributes,
         pl_attribs: PlatformSpecificWindowBuilderAttributes,
     ) -> Result<Self, RootOsError> {
+        let parent_window_id = attributes.parent_window_id;
         let (window, _delegate) = UnownedWindow::new(attributes, pl_attribs)?;
+        // set child to parent
+        if let Some(parent_window_id) = parent_window_id {
+            let parent_window_id: cocoa::base::id = get_window_cocoa_id(parent_window_id.0);
+            window.add_child_to(IdRef::retain(parent_window_id));
+        }
         Ok(Window { window, _delegate })
+    }
+
+    pub fn add_child_to(&self, parent_window_id: WindowId) {
+        let parent_window_id: cocoa::base::id = get_window_cocoa_id(parent_window_id);
+        self.window.add_child_to(IdRef::retain(parent_window_id));
+    }
+
+    pub fn child_windows(&self) {
+        self.window.child_windows();
+    }
+
+    pub fn remove_self_as_child_from_parent(&self) {
+        self.window.remove_self_as_child_from_parent();
+    }
+
+    pub fn close_window(&self) {
+        self.window.close_window();
     }
 }
 

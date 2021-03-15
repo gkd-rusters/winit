@@ -100,6 +100,8 @@ impl fmt::Debug for WindowBuilder {
 /// Attributes to use when creating a window.
 #[derive(Debug, Clone)]
 pub struct WindowAttributes {
+    /// parent_window_id
+    pub parent_window_id: Option<WindowId>,
     /// The dimensions of the window. If this is `None`, some platform-specific dimensions will be
     /// used.
     ///
@@ -167,6 +169,7 @@ impl Default for WindowAttributes {
     #[inline]
     fn default() -> WindowAttributes {
         WindowAttributes {
+            parent_window_id: None,
             inner_size: None,
             min_inner_size: None,
             max_inner_size: None,
@@ -304,6 +307,19 @@ impl WindowBuilder {
     #[inline]
     pub fn with_always_on_top(mut self, always_on_top: bool) -> Self {
         self.window.always_on_top = always_on_top;
+        self
+    }
+
+    #[inline]
+    pub fn with_parent_window_id(mut self, parent_window_id: Option<WindowId>) -> Self {
+        self.window.parent_window_id = parent_window_id;
+        #[cfg(target_os = "windows")]
+        {
+            if parent_window_id.is_some() {
+                self.platform_specific.on_taskbar = false;
+            }
+            // self.platform_specific.parent = parent_window_id.map(|x| x.0.get_handle());
+        }
         self
     }
 
@@ -557,6 +573,47 @@ impl Window {
         self.window.set_visible(visible)
     }
 
+    #[inline]
+    pub fn is_visible(&self) -> bool {
+        self.window.is_visible()
+    }
+    /// Set window ignore mouse event or not.
+    /// if `false`, window will catch mouse events.
+    /// if `true`, window will ignore mouse events, and events will penetrate to window below.
+    ///
+    /// ## Platform-specific
+    ///
+    /// - **iOS / Android / Web:** Unsupported.
+    #[inline]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    pub fn set_is_ignore_mouse_events(&self, is_ignore_mouse_events: bool) {
+        self.window
+            .set_is_ignore_mouse_events(is_ignore_mouse_events)
+    }
+
+    #[inline]
+    #[cfg(target_os = "macos")]
+    pub fn add_child_to(&self, parent_window_id: WindowId) {
+        self.window.add_child_to(parent_window_id.0)
+    }
+
+    #[inline]
+    #[cfg(target_os = "macos")]
+    pub fn child_windows(&self) {
+        self.window.child_windows();
+    }
+
+    #[inline]
+    #[cfg(target_os = "macos")]
+    pub fn remove_self_as_child_from_parent(&self) {
+        self.window.remove_self_as_child_from_parent();
+    }
+    #[inline]
+    #[cfg(target_os = "macos")]
+    pub fn close_window(&self) {
+        self.window.close_window();
+    }
+
     /// Sets whether the window is resizable or not.
     ///
     /// Note that making the window unresizable doesn't exempt you from handling `Resized`, as that event can still be
@@ -655,6 +712,27 @@ impl Window {
     #[inline]
     pub fn set_decorations(&self, decorations: bool) {
         self.window.set_decorations(decorations)
+    }
+
+    /// Turn window decorations on and make titiebar taransparent.
+    /// ## Platform-specific
+    ///
+    /// - **iOS / Android / Web / Wayland /Win:** Unsupported.
+    #[inline]
+    #[cfg(target_os = "macos")]
+    pub fn set_mac_titlebar_style(
+        &self,
+        is_titlebar_transparent: bool,
+        is_close_button_visible: bool,
+        is_min_button_visible: bool,
+        is_fullscreen_visible: bool,
+    ) {
+        self.window.set_mac_titlebar_style(
+            is_titlebar_transparent,
+            is_close_button_visible,
+            is_min_button_visible,
+            is_fullscreen_visible,
+        );
     }
 
     /// Change whether or not the window will always be on top of other windows.

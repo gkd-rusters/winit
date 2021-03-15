@@ -17,6 +17,7 @@
 - On Web, added support for `DeviceEvent::MouseMotion` to listen for relative mouse movements.
 - Added `Window::drag_window`. Implemented on Windows, macOS, X11 and Wayland.
 - On X11, bump `mio` to 0.7.
+- On Windows, fix fullscreen not preserving minimized/maximized state.
 
 # 0.24.0 (2020-12-09)
 

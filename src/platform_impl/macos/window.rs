@@ -36,7 +36,7 @@ use cocoa::{
     appkit::{
         self, CGFloat, NSApp, NSApplication, NSApplicationActivationPolicy,
         NSApplicationPresentationOptions, NSColor, NSRequestUserAttentionType, NSScreen, NSView,
-        NSWindow, NSWindowButton, NSWindowStyleMask,
+        NSWindow, NSWindowButton, NSWindowCollectionBehavior, NSWindowStyleMask,
     },
     base::{id, nil},
     foundation::{NSAutoreleasePool, NSDictionary, NSPoint, NSRect, NSSize},
@@ -62,6 +62,11 @@ pub fn get_window_id(window_cocoa_id: id) -> Id {
     Id(window_cocoa_id as *const Object as _)
 }
 
+pub fn get_window_cocoa_id(window_id: Id) -> id {
+    // Id(window_cocoa_id as *const Object as _)
+    window_id.0 as *const Object as *mut Object
+}
+
 #[derive(Clone)]
 pub struct PlatformSpecificWindowBuilderAttributes {
     pub activation_policy: ActivationPolicy,
@@ -74,6 +79,7 @@ pub struct PlatformSpecificWindowBuilderAttributes {
     pub resize_increments: Option<LogicalSize<f64>>,
     pub disallow_hidpi: bool,
     pub has_shadow: bool,
+    pub visible_in_all_workspace: bool,
 }
 
 impl Default for PlatformSpecificWindowBuilderAttributes {
@@ -90,6 +96,7 @@ impl Default for PlatformSpecificWindowBuilderAttributes {
             resize_increments: None,
             disallow_hidpi: false,
             has_shadow: true,
+            visible_in_all_workspace: false,
         }
     }
 }
@@ -197,7 +204,18 @@ fn create_window(
             masks |= NSWindowStyleMask::NSFullSizeContentViewWindowMask;
         }
 
-        let ns_window: id = msg_send![WINDOW_CLASS.0, alloc];
+        if pl_attrs.visible_in_all_workspace {
+            let mut temp = std::mem::transmute::<NSWindowStyleMask, u64>(masks);
+            temp |= 1 << 7;
+            masks = std::mem::transmute::<u64, NSWindowStyleMask>(temp);
+        }
+
+        let ns_window: id = if pl_attrs.visible_in_all_workspace {
+            msg_send![WINDOW_PANEL_CLASS.0, alloc]
+        } else {
+            msg_send![WINDOW_CLASS.0, alloc]
+        };
+
         let ns_window = IdRef::new(ns_window.initWithContentRect_styleMask_backing_defer_(
             frame,
             masks,
@@ -208,7 +226,7 @@ fn create_window(
             let title = util::ns_string_id_ref(&attrs.title);
             ns_window.setReleasedWhenClosed_(NO);
             ns_window.setTitle_(*title);
-            ns_window.setAcceptsMouseMovedEvents_(YES);
+            ns_window.setAcceptsMouseMovedEvents_(NO);
 
             if pl_attrs.titlebar_transparent {
                 ns_window.setTitlebarAppearsTransparent_(YES);
@@ -250,6 +268,14 @@ fn create_window(
                 ns_window.setHasShadow_(NO);
             }
 
+            if pl_attrs.visible_in_all_workspace {
+                let behavior =
+                    NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces
+                        | NSWindowCollectionBehavior::NSWindowCollectionBehaviorFullScreenAuxiliary;
+
+                ns_window.setCollectionBehavior_(behavior);
+            }
+
             ns_window.center();
             ns_window
         });
@@ -266,6 +292,19 @@ lazy_static! {
     static ref WINDOW_CLASS: WindowClass = unsafe {
         let window_superclass = class!(NSWindow);
         let mut decl = ClassDecl::new("WinitWindow", window_superclass).unwrap();
+        decl.add_method(
+            sel!(canBecomeMainWindow),
+            util::yes as extern "C" fn(&Object, Sel) -> BOOL,
+        );
+        decl.add_method(
+            sel!(canBecomeKeyWindow),
+            util::yes as extern "C" fn(&Object, Sel) -> BOOL,
+        );
+        WindowClass(decl.register())
+    };
+    static ref WINDOW_PANEL_CLASS: WindowClass = unsafe {
+        let window_superclass = class!(NSPanel);
+        let mut decl = ClassDecl::new("WinitPanelWindow", window_superclass).unwrap();
         decl.add_method(
             sel!(canBecomeMainWindow),
             util::yes as extern "C" fn(&Object, Sel) -> BOOL,
@@ -460,11 +499,54 @@ impl UnownedWindow {
         }
     }
 
+    pub fn add_child_to(&self, parent_ns_window_idref: IdRef) {
+        unsafe {
+            util::add_child_window_async(*self.ns_window, *parent_ns_window_idref);
+        }
+    }
+
+    // pub fn add_child(&self, child_ns_window_idref: IdRef) {
+    //     unsafe {
+    //         util::add_child_window_async(*child_ns_window_idref, *self.ns_window);
+    //     }
+    // }
+
+    pub fn remove_self_as_child_from_parent(&self) {
+        unsafe {
+            util::remove_child_window_async(*self.ns_window);
+        }
+    }
+
+    pub fn close_window(&self) {
+        if *self.ns_window != nil {
+            unsafe {
+                // util::close_async(*self.ns_window);
+                util::close_async(self.ns_window.clone());
+            }
+        }
+    }
+
+    pub fn child_windows(&self) {
+        unsafe {
+            util::child_windows(*self.ns_window);
+        }
+    }
+
+    pub fn set_is_ignore_mouse_events(&self, is_ignore_mouse_events: bool) {
+        unsafe {
+            util::set_window_ignore_mouse_events(*self.ns_window, is_ignore_mouse_events);
+        }
+    }
+
     pub fn set_visible(&self, visible: bool) {
         match visible {
             true => unsafe { util::make_key_and_order_front_async(*self.ns_window) },
             false => unsafe { util::order_out_async(*self.ns_window) },
         }
+    }
+
+    pub fn is_visible(&self) -> bool {
+        unsafe { self.ns_window.isVisible() == YES }
     }
 
     pub fn request_redraw(&self) {
@@ -969,6 +1051,75 @@ impl UnownedWindow {
     }
 
     #[inline]
+    pub fn set_mac_titlebar_style(
+        &self,
+        is_titlebar_transparent: bool,
+        is_close_button_visible: bool,
+        is_min_button_visible: bool,
+        is_fullscreen_visible: bool,
+    ) {
+        let (fullscreen, resizable) = {
+            trace!("Locked shared state in `set_titlebar_transparent`");
+            let shared_state_lock = self.shared_state.lock().unwrap();
+            trace!("Unlocked shared state in `set_titlebar_transparent`");
+            (
+                shared_state_lock.fullscreen.is_some(),
+                shared_state_lock.resizable,
+            )
+        };
+
+        // If we're in fullscreen mode, we wait to apply decoration changes
+        // until we're in `window_did_exit_fullscreen`.
+        if fullscreen {
+            return;
+        }
+
+        let mut new_mask = NSWindowStyleMask::NSTitledWindowMask
+            | NSWindowStyleMask::NSClosableWindowMask
+            | NSWindowStyleMask::NSMiniaturizableWindowMask;
+
+        // Resizeable is related to fullscreen button
+        if resizable {
+            new_mask |= NSWindowStyleMask::NSResizableWindowMask;
+        }
+
+        unsafe {
+            let button = self
+                .ns_window
+                .standardWindowButton_(NSWindowButton::NSWindowCloseButton);
+            let _: () = msg_send![button, setHidden: !is_close_button_visible as BOOL];
+
+            let button = self
+                .ns_window
+                .standardWindowButton_(NSWindowButton::NSWindowMiniaturizeButton);
+            let _: () = msg_send![button, setHidden: !is_min_button_visible as BOOL];
+
+            let button = self
+                .ns_window
+                .standardWindowButton_(NSWindowButton::NSWindowZoomButton);
+            let _: () = msg_send![button, setHidden: !is_fullscreen_visible as BOOL];
+        }
+
+        if is_titlebar_transparent {
+            unsafe {
+                self.ns_window
+                    .setTitleVisibility_(appkit::NSWindowTitleVisibility::NSWindowTitleHidden);
+                self.ns_window.setTitlebarAppearsTransparent_(YES);
+            }
+            new_mask |= NSWindowStyleMask::NSFullSizeContentViewWindowMask;
+        } else {
+            unsafe {
+                self.ns_window
+                    .setTitleVisibility_(appkit::NSWindowTitleVisibility::NSWindowTitleVisible);
+                self.ns_window.setTitlebarAppearsTransparent_(NO);
+            }
+            new_mask &= !NSWindowStyleMask::NSFullSizeContentViewWindowMask;
+        }
+
+        self.set_style_mask_async(new_mask);
+    }
+
+    #[inline]
     pub fn set_window_icon(&self, _icon: Option<Icon>) {
         // macOS doesn't have window icons. Though, there is
         // `setRepresentedFilename`, but that's semantically distinct and should
@@ -1159,6 +1310,38 @@ impl WindowExtMacOS for UnownedWindow {
         unsafe {
             self.ns_window
                 .setHasShadow_(if has_shadow { YES } else { NO })
+        }
+    }
+
+    #[inline]
+    fn get_window_level(&self) -> i64 {
+        unsafe { self.ns_window.level() }
+    }
+
+    #[inline]
+    fn set_window_level(&self, level: i64) {
+        unsafe { self.ns_window.setLevel_(level) }
+    }
+
+    #[inline]
+    fn focus(&self) {
+        unsafe {
+            self.ns_window.makeKeyWindow();
+        }
+    }
+
+    #[inline]
+    fn focus_and_front(&self) {
+        unsafe {
+            self.ns_window.makeKeyAndOrderFront_(nil);
+        }
+    }
+
+    #[inline]
+    fn set_window_draggable(&self, draggable: bool) {
+        unsafe {
+            self.ns_window
+                .setMovableByWindowBackground_(if draggable { YES } else { NO });
         }
     }
 }

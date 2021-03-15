@@ -57,7 +57,7 @@ pub(super) struct ViewState {
     raw_characters: Option<String>,
     is_key_down: bool,
     pub(super) modifiers: ModifiersState,
-    tracking_rect: Option<NSInteger>,
+    pub tracking_area: Option<id>,
 }
 
 impl ViewState {
@@ -76,7 +76,7 @@ pub fn new_view(ns_window: id) -> (IdRef, Weak<Mutex<CursorState>>) {
         raw_characters: None,
         is_key_down: false,
         modifiers: Default::default(),
-        tracking_rect: None,
+        tracking_area: None,
     };
     unsafe {
         // This is free'd in `dealloc`
@@ -149,7 +149,10 @@ lazy_static! {
             sel!(setMarkedText:selectedRange:replacementRange:),
             set_marked_text as extern "C" fn(&mut Object, Sel, id, NSRange, NSRange),
         );
-        decl.add_method(sel!(unmarkText), unmark_text as extern "C" fn(&Object, Sel));
+        decl.add_method(
+            sel!(unmarkText),
+            unmark_text as extern "C" fn(&mut Object, Sel),
+        );
         decl.add_method(
             sel!(validAttributesForMarkedText),
             valid_attributes_for_marked_text as extern "C" fn(&Object, Sel) -> id,
@@ -176,7 +179,10 @@ lazy_static! {
             sel!(doCommandBySelector:),
             do_command_by_selector as extern "C" fn(&Object, Sel, Sel),
         );
-        decl.add_method(sel!(keyDown:), key_down as extern "C" fn(&Object, Sel, id));
+        decl.add_method(
+            sel!(keyDown:),
+            key_down as extern "C" fn(&mut Object, Sel, id),
+        );
         decl.add_method(sel!(keyUp:), key_up as extern "C" fn(&Object, Sel, id));
         decl.add_method(
             sel!(flagsChanged:),
@@ -255,9 +261,18 @@ lazy_static! {
             sel!(frameDidChange:),
             frame_did_change as extern "C" fn(&Object, Sel, id),
         );
+        decl.add_method(
+            sel!(clearMarkedText),
+            clear_marked_text as extern "C" fn(&mut Object, Sel),
+        );
+        decl.add_method(
+            sel!(acceptsFirstMouse:),
+            accepts_first_mouse as extern "C" fn(&Object, Sel, id) -> BOOL,
+        );
         decl.add_ivar::<*mut c_void>("winitState");
         decl.add_ivar::<id>("markedText");
         decl.add_ivar::<bool>("isComposing");
+        decl.add_ivar::<bool>("isIMEActivated");
         let protocol = Protocol::get("NSTextInputClient").unwrap();
         decl.add_protocol(&protocol);
         ViewClass(decl.register())
@@ -282,6 +297,7 @@ extern "C" fn init_with_winit(this: &Object, _sel: Sel, state: *mut c_void) -> i
                 <id as NSMutableAttributedString>::init(NSMutableAttributedString::alloc(nil));
             (*this).set_ivar("markedText", marked_text);
             (*this).set_ivar("isComposing", false);
+            (*this).set_ivar("isIMEActivated", false);
             let _: () = msg_send![this, setPostsFrameChangedNotifications: YES];
 
             let notification_center: &Object =
@@ -306,18 +322,22 @@ extern "C" fn view_did_move_to_window(this: &Object, _sel: Sel) {
         let state_ptr: *mut c_void = *this.get_ivar("winitState");
         let state = &mut *(state_ptr as *mut ViewState);
 
-        if let Some(tracking_rect) = state.tracking_rect.take() {
-            let _: () = msg_send![this, removeTrackingRect: tracking_rect];
+        if let Some(tracking_area) = state.tracking_area.take() {
+            let _: () = msg_send![this, removeTrackingArea: tracking_area];
         }
 
         let rect: NSRect = msg_send![this, visibleRect];
-        let tracking_rect: NSInteger = msg_send![this,
-            addTrackingRect:rect
-            owner:this
-            userData:nil
-            assumeInside:NO
+        let tracking_area: id = msg_send![class!(NSTrackingArea), alloc];
+        let tracking_area: id = msg_send![tracking_area,
+                    initWithRect:rect
+                    options:(NSTrackingMouseEnteredAndExited | NNSTrackingMouseMoved | NSTrackingActiveAlways)
+                    owner:this
+                    userInfo:nil
         ];
-        state.tracking_rect = Some(tracking_rect);
+
+        let _: () = msg_send![this, addTrackingArea: tracking_area];
+
+        state.tracking_area = Some(tracking_area);
     }
     trace!("Completed `viewDidMoveToWindow`");
 }
@@ -327,19 +347,22 @@ extern "C" fn frame_did_change(this: &Object, _sel: Sel, _event: id) {
         let state_ptr: *mut c_void = *this.get_ivar("winitState");
         let state = &mut *(state_ptr as *mut ViewState);
 
-        if let Some(tracking_rect) = state.tracking_rect.take() {
-            let _: () = msg_send![this, removeTrackingRect: tracking_rect];
+        if let Some(tracking_area) = state.tracking_area.take() {
+            let _: () = msg_send![this, removeTrackingArea: tracking_area];
         }
 
         let rect: NSRect = msg_send![this, visibleRect];
-        let tracking_rect: NSInteger = msg_send![this,
-            addTrackingRect:rect
-            owner:this
-            userData:nil
-            assumeInside:NO
+        let tracking_area: id = msg_send![class!(NSTrackingArea), alloc];
+        let tracking_area: id = msg_send![tracking_area,
+                    initWithRect:rect
+                    options:(NSTrackingMouseEnteredAndExited | NNSTrackingMouseMoved | NSTrackingActiveAlways)
+                    owner:this
+                    userInfo:nil
         ];
 
-        state.tracking_rect = Some(tracking_rect);
+        let _: () = msg_send![this, addTrackingArea: tracking_area];
+
+        state.tracking_area = Some(tracking_area);
     }
 }
 
@@ -414,6 +437,14 @@ extern "C" fn selected_range(_this: &Object, _sel: Sel) -> NSRange {
     util::EMPTY_RANGE
 }
 
+extern "C" fn clear_marked_text(this: &mut Object, _sel: Sel) {
+    unsafe {
+        let marked_text_ref: &mut id = this.get_mut_ivar("markedText");
+        let _: () = msg_send![(*marked_text_ref), release];
+        *marked_text_ref = NSMutableAttributedString::alloc(nil);
+    }
+}
+
 extern "C" fn set_marked_text(
     this: &mut Object,
     _sel: Sel,
@@ -423,6 +454,7 @@ extern "C" fn set_marked_text(
 ) {
     trace!("Triggered `setMarkedText`");
     unsafe {
+        this.set_ivar("isIMEActivated", true);
         let marked_text_ref: &mut id = this.get_mut_ivar("markedText");
         let _: () = msg_send![(*marked_text_ref), release];
         let marked_text = NSMutableAttributedString::alloc(nil);
@@ -432,17 +464,17 @@ extern "C" fn set_marked_text(
         } else {
             marked_text.initWithString(string);
         };
-        let composed_string = marked_text.clone().string();
         *marked_text_ref = marked_text;
 
-        let state_ptr: *mut c_void = *this.get_ivar("winitState");
-        let state = &mut *(state_ptr as *mut ViewState);
-
+        let composed_string = marked_text_ref.clone().string();
         let slice = slice::from_raw_parts(
             composed_string.UTF8String() as *const c_uchar,
             composed_string.len(),
         );
         let composed_string = str::from_utf8_unchecked(slice);
+
+        let state_ptr: *mut c_void = *this.get_ivar("winitState");
+        let state = &mut *(state_ptr as *mut ViewState);
 
         let is_composing: bool = *this.get_ivar("isComposing");
         if !is_composing {
@@ -464,12 +496,10 @@ extern "C" fn set_marked_text(
     trace!("Completed `setMarkedText`");
 }
 
-extern "C" fn unmark_text(this: &Object, _sel: Sel) {
+extern "C" fn unmark_text(this: &mut Object, _sel: Sel) {
     trace!("Triggered `unmarkText`");
     unsafe {
-        let marked_text: id = *this.get_ivar("markedText");
-        let mutable_string = marked_text.mutableString();
-        let _: () = msg_send![mutable_string, setString:""];
+        let _: () = msg_send![this, clearMarkedText];
         let input_context: id = msg_send![this, inputContext];
         let _: () = msg_send![input_context, discardMarkedText];
     }
@@ -549,8 +579,8 @@ extern "C" fn insert_text(this: &mut Object, _sel: Sel, string: id, _replacement
         // We don't need this now, but it's here if that changes.
         //let event: id = msg_send![NSApp(), currentEvent];
 
-        let mut events = VecDeque::with_capacity(characters.len());        
-        
+        let mut events = VecDeque::with_capacity(characters.len());
+
         for character in string.chars() {
             events.push_back(EventWrapper::StaticEvent(Event::WindowEvent {
                 window_id: WindowId(get_window_id(state.ns_window)),
@@ -558,6 +588,7 @@ extern "C" fn insert_text(this: &mut Object, _sel: Sel, string: id, _replacement
             }));
         }
 
+        // End composition if exists.
         let is_composing: bool = *this.get_ivar("isComposing");
         if is_composing {
             events.push_back(EventWrapper::StaticEvent(Event::WindowEvent {
@@ -641,6 +672,16 @@ fn is_corporate_character(c: char) -> bool {
     }
 }
 
+fn is_arrow_key(virtual_keycode: VirtualKeyCode) -> bool {
+    match virtual_keycode {
+        VirtualKeyCode::Up
+        | VirtualKeyCode::Right
+        | VirtualKeyCode::Down
+        | VirtualKeyCode::Left => true,
+        _ => false,
+    }
+}
+
 // Retrieves a layout-independent keycode given an event.
 fn retrieve_keycode(event: id) -> Option<VirtualKeyCode> {
     #[inline]
@@ -678,7 +719,7 @@ fn update_potentially_stale_modifiers(state: &mut ViewState, event: id) {
     }
 }
 
-extern "C" fn key_down(this: &Object, _sel: Sel, event: id) {
+extern "C" fn key_down(this: &mut Object, _sel: Sel, event: id) {
     trace!("Triggered `keyDown`");
     unsafe {
         let state_ptr: *mut c_void = *this.get_ivar("winitState");
@@ -727,11 +768,34 @@ extern "C" fn key_down(this: &Object, _sel: Sel, event: id) {
         };
 
         if pass_along {
+            // Clear them here so that we can know whether they have changed afterwards.
+            let _: () = msg_send![this, clearMarkedText];
+            this.set_ivar("isIMEActivated", false);
+
             // Some keys (and only *some*, with no known reason) don't trigger `insertText`, while others do...
             // So, we don't give repeats the opportunity to trigger that, since otherwise our hack will cause some
             // keys to generate twice as many characters.
             let array: id = msg_send![class!(NSArray), arrayWithObject: event];
             let _: () = msg_send![this, interpretKeyEvents: array];
+
+            // If `set_marked_text` or `insert_text` not invoked, meaning IME was deactivated.
+            // when use arrow key in IME window, input context won't invoke the methods above,
+            // so we need ignore them.
+            let is_composing: bool = *this.get_ivar("isComposing");
+            let is_ime_activated: bool = *this.get_ivar("isIMEActivated");
+            let is_arrow_key = virtual_keycode
+                .map(|keycode| is_arrow_key(keycode))
+                .unwrap_or(false);
+            if !is_arrow_key && is_composing && !is_ime_activated {
+                let _: () = msg_send![this, unmarkText];
+                AppState::queue_event(EventWrapper::StaticEvent(Event::WindowEvent {
+                    window_id: WindowId(get_window_id(state.ns_window)),
+                    event: WindowEvent::Composition(CompositionEvent::CompositionEnd(
+                        "".to_owned(),
+                    )),
+                }));
+                this.set_ivar("isComposing", false);
+            }
         }
     }
     trace!("Completed `keyDown`");
@@ -887,6 +951,10 @@ extern "C" fn cancel_operation(this: &Object, _sel: Sel, _sender: id) {
         AppState::queue_event(EventWrapper::StaticEvent(window_event));
     }
     trace!("Completed `cancelOperation`");
+}
+
+extern "C" fn accepts_first_mouse(_this: &Object, _sel: Sel, _event: id) -> BOOL {
+    YES
 }
 
 fn mouse_click(this: &Object, event: id, button: MouseButton, button_state: ElementState) {

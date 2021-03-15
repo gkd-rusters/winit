@@ -147,6 +147,22 @@ impl Window {
     }
 
     #[inline]
+    pub fn is_visible(&self) -> bool {
+        util::is_visible(self.window.0)
+    }
+
+    #[inline]
+    pub fn set_is_ignore_mouse_events(&self, is_ignore_mouse_events: bool) {
+        let window = self.window.clone();
+        let window_state = Arc::clone(&self.window_state);
+        self.thread_executor.execute_in_thread(move || {
+            WindowState::set_window_flags(window_state.lock(), window.0, |f| {
+                f.set(WindowFlags::IGNORE_MOUSE_EVENT, is_ignore_mouse_events)
+            });
+        });
+    }
+
+    #[inline]
     pub fn request_redraw(&self) {
         unsafe {
             winuser::RedrawWindow(
@@ -734,7 +750,7 @@ unsafe fn init<T: 'static>(
     // WindowFlags::VISIBLE and MAXIMIZED are set down below after the window has been configured.
     window_flags.set(WindowFlags::RESIZABLE, attributes.resizable);
     window_flags.set(WindowFlags::CHILD, pl_attribs.parent.is_some());
-    window_flags.set(WindowFlags::ON_TASKBAR, true);
+    window_flags.set(WindowFlags::ON_TASKBAR, pl_attribs.on_taskbar);
 
     if pl_attribs.parent.is_some() && pl_attribs.menu.is_some() {
         warn!("Setting a menu on windows that have a parent is unsupported");

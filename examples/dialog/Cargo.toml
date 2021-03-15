@@ -1,0 +1,13 @@
+
+[package]
+name = "dialog"
+version = "0.1.0"
+authors = ["yuebansanren"]
+edition = "2018"
+
+
+[dependencies]
+winit = {path = "../../"}
+native-dialog = "0.5.2"
+simple_logger = "1.9"
+

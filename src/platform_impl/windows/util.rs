@@ -196,6 +196,11 @@ pub fn is_focused(window: HWND) -> bool {
     window == unsafe { winuser::GetActiveWindow() }
 }
 
+pub fn is_visible(window: HWND) -> bool {
+    let ret: i32 = unsafe { winuser::IsWindowVisible(window) };
+    ret == 1
+}
+
 impl CursorIcon {
     pub(crate) fn to_windows_cursor(self) -> *const wchar_t {
         match self {

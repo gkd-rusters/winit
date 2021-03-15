@@ -1,4 +1,5 @@
 use simple_logger::SimpleLogger;
+use winit::monitor::get_all_monitors;
 use winit::{event_loop::EventLoop, window::WindowBuilder};
 
 fn main() {

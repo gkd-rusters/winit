@@ -38,6 +38,21 @@ pub trait WindowExtMacOS {
 
     /// Sets whether or not the window has shadow.
     fn set_has_shadow(&self, has_shadow: bool);
+
+    /// Get window z-level
+    fn get_window_level(&self) -> i64;
+
+    /// Set window z-level
+    fn set_window_level(&self, level: i64);
+
+    /// Focus the window
+    fn focus(&self);
+
+    /// Focus the window, and moves the window to the front of the screen list
+    fn focus_and_front(&self);
+
+    /// Sets whether or not the window can move when titlebar is hidden.
+    fn set_window_draggable(&self, draggable: bool);
 }
 
 impl WindowExtMacOS for Window {
@@ -69,6 +84,31 @@ impl WindowExtMacOS for Window {
     #[inline]
     fn set_has_shadow(&self, has_shadow: bool) {
         self.window.set_has_shadow(has_shadow)
+    }
+
+    #[inline]
+    fn get_window_level(&self) -> i64 {
+        self.window.get_window_level()
+    }
+
+    #[inline]
+    fn set_window_level(&self, level: i64) {
+        self.window.set_window_level(level)
+    }
+
+    #[inline]
+    fn focus(&self) {
+        self.window.focus();
+    }
+
+    #[inline]
+    fn focus_and_front(&self) {
+        self.window.focus_and_front();
+    }
+
+    #[inline]
+    fn set_window_draggable(&self, draggable: bool) {
+        self.window.set_window_draggable(draggable);
     }
 }
 
@@ -119,6 +159,7 @@ pub trait WindowBuilderExtMacOS {
     fn with_resize_increments(self, increments: LogicalSize<f64>) -> WindowBuilder;
     fn with_disallow_hidpi(self, disallow_hidpi: bool) -> WindowBuilder;
     fn with_has_shadow(self, has_shadow: bool) -> WindowBuilder;
+    fn with_visible_in_all_workspace(self, visible_in_all_workspace: bool) -> WindowBuilder;
 }
 
 impl WindowBuilderExtMacOS for WindowBuilder {
@@ -182,6 +223,12 @@ impl WindowBuilderExtMacOS for WindowBuilder {
     #[inline]
     fn with_has_shadow(mut self, has_shadow: bool) -> WindowBuilder {
         self.platform_specific.has_shadow = has_shadow;
+        self
+    }
+
+    #[inline]
+    fn with_visible_in_all_workspace(mut self, visible_in_all_workspace: bool) -> WindowBuilder {
+        self.platform_specific.visible_in_all_workspace = visible_in_all_workspace;
         self
     }
 }

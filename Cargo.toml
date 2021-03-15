@@ -1,13 +1,13 @@
 [package]
 name = "winit"
-version = "0.24.0"
+version = "0.24.7"
 authors = ["The winit contributors", "Pierre Krieger <pierre.krieger1708@gmail.com>"]
 description = "Cross-platform window creation library."
 edition = "2018"
 keywords = ["windowing"]
 license = "Apache-2.0"
 readme = "README.md"
-repository = "https://github.com/rust-windowing/winit"
+repository = "https://github.com/gkd-rusters/winit.git"
 documentation = "https://docs.rs/winit"
 categories = ["gui"]
 
@@ -45,13 +45,19 @@ ndk-glue = "0.3"
 objc = "0.2.7"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-cocoa = "0.24"
-core-foundation = "0.9"
-core-graphics = "0.22"
+# cocoa = {  version = "0.24"}
+cocoa = {git = "https://github.com/gkd-rusters/core-foundation-rs.git", branch = "gkd", package = "cocoa"}
+# core-foundation = {  version = "0.9"}
+core-foundation = {git = "https://github.com/gkd-rusters/core-foundation-rs.git", branch = "gkd", package = "core-foundation"}
+
+# core-graphics = {  version = "0.22" }
+core-graphics = {git = "https://github.com/gkd-rusters/core-foundation-rs.git", branch = "gkd", package = "core-graphics"}
+
 dispatch = "0.2.0"
 scopeguard = "1.1"
 
 [target.'cfg(target_os = "macos")'.dependencies.core-video-sys]
+
 version = "0.1.4"
 default_features = false
 features = ["display_link"]
@@ -85,7 +91,7 @@ features = [
 ]
 
 [target.'cfg(any(target_os = "linux", target_os = "dragonfly", target_os = "freebsd", target_os = "openbsd", target_os = "netbsd"))'.dependencies]
-wayland-client = { version = "0.28", features = [ "dlopen"] , optional = true }
+wayland-client = { version = "0.28", features = [ "dlopen"], optional = true }
 sctk = { package = "smithay-client-toolkit", version = "0.12.3", optional = true }
 mio = { version = "0.7", features = ["os-ext"], optional = true }
 mio-misc = { version = "1.0", optional = true }
@@ -132,3 +138,4 @@ features = ["experimental_features_which_may_break_on_minor_version_bumps"]
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 console_log = "0.2"
+
